@@ -1,0 +1,182 @@
+!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>HTML-GMD est2026</title>
+    <style>
+        body { margin: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; color: #fff; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        #menu { position: absolute; background: rgba(0,0,0,0.95); padding: 25px; border: 2px solid var(--accent); border-radius: 15px; text-align: center; z-index: 20; width: 340px; box-shadow: 0 0 50px rgba(0,0,0,0.5); }
+        .branding { font-size: 10px; letter-spacing: 2px; color: var(--accent); opacity: 0.7; margin-bottom: 10px; }
+        .group { margin: 12px 0; text-align: left; background: #111; padding: 8px; border-radius: 5px; border: 1px solid #333; }
+        label { display: block; font-size: 10px; margin-bottom: 5px; color: var(--accent); font-weight: bold; }
+        input, select { width: 100%; background: #000; color: #fff; border: 1px solid #444; padding: 5px; cursor: pointer; }
+        button { background: var(--accent); border: none; padding: 12px; font-weight: bold; cursor: pointer; border-radius: 5px; margin-top: 10px; width: 100%; color: #000; transition: 0.2s; }
+        button:hover { background: #fff; }
+        #progress-container { width: 800px; height: 8px; background: #111; border: 1px solid var(--accent); margin-bottom: 5px; border-radius: 4px; overflow: hidden; visibility: hidden; }
+        #progress-bar { height: 100%; width: 0%; background: var(--accent); }
+        canvas { border: 3px solid var(--accent); background: #000; visibility: hidden; }
+        :root { --accent: #0f0; }
+        .ui { width: 800px; display: flex; justify-content: space-between; margin-bottom: 5px; font-weight: bold; visibility: hidden; }
+    </style>
+</head>
+<body>
+
+    <div id="menu">
+        <div class="branding">HTML-GMD EST2026</div>
+        <div class="group">
+            <label>ICON COLOR</label>
+            <input type="color" id="colorPick" value="#00ff00">
+        </div>
+        <div class="group">
+            <label>GAME MODE</label>
+            <select id="modeSelect">
+                <option value="all">ALL (PORTALS)</option>
+                <option value="cube">CUBE ONLY</option>
+                <option value="ship">SHIP ONLY</option>
+                <option value="wave">WAVE ONLY</option>
+            </select>
+        </div>
+        <div class="group">
+            <label>SPEED & LENGTH</label>
+            <input type="range" id="diffSlider" min="6" max="15" value="8">
+            <input type="range" id="lenSlider" min="1000" max="15000" value="4000" step="1000">
+        </div>
+        <div class="group" style="display:flex; align-items:center; gap:10px">
+            <label style="margin:0">CITYSCAPE:</label>
+            <input type="checkbox" id="cityToggle" checked style="width:20px">
+        </div>
+        <button id="startBtn">START LEVEL</button>
+    </div>
+
+    <div class="ui" id="gameUI">
+        <div>MODE: <span id="modeText" style="color:var(--accent)">CUBE</span></div>
+        <div>COINS: <span id="coinText" style="color:#ffd700">0</span> | SCORE: <span id="score">0</span></div>
+    </div>
+    <div id="progress-container"><div id="progress-bar"></div></div>
+    <canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score'), coinEl = document.getElementById('coinText'), modeEl = document.getElementById('modeText'), progBar = document.getElementById('progress-bar'), menu = document.getElementById('menu');
+
+canvas.width = 800; canvas.height = 400;
+const GROUND_Y = 320;
+
+let state = {
+    running: false, mode: 'cube', modeLock: 'all', color: '#0f0', speed: 8, 
+    score: 0, coins: 0, targetScore: 4000, showCity: true,
+    isPressed: false, trail: [], obstacles: [], buildings: [], frame: 0
+};
+
+const player = { x: 150, y: GROUND_Y, vy: 0, size: 30, rot: 0 };
+
+// Initialize Cityscape
+function genCity() {
+    state.buildings = [];
+    for(let i=0; i<15; i++) {
+        state.buildings.push({ x: i * 60, w: 40 + Math.random()*40, h: 50 + Math.random()*150 });
+    }
+}
+
+document.getElementById('startBtn').onclick = () => {
+    state.speed = parseInt(document.getElementById('diffSlider').value);
+    state.targetScore = parseInt(document.getElementById('lenSlider').value);
+    state.modeLock = document.getElementById('modeSelect').value;
+    state.color = document.getElementById('colorPick').value;
+    state.showCity = document.getElementById('cityToggle').checked;
+    state.mode = state.modeLock === 'all' ? 'cube' : state.modeLock;
+    document.documentElement.style.setProperty('--accent', state.color);
+    
+    state.running = true; state.score = 0; state.coins = 0; state.obstacles = []; state.trail = [];
+    if(state.showCity) genCity();
+    menu.style.display = 'none';
+    canvas.style.visibility = 'visible';
+    document.getElementById('gameUI').style.visibility = 'visible';
+    document.getElementById('progress-container').style.visibility = 'visible';
+    loop();
+};
+
+const setInput = (v) => state.isPressed = v;
+window.onkeydown = (e) => { if(e.code === 'Space' || e.code === 'ArrowUp') setInput(true); };
+window.onkeyup = (e) => { if(e.code === 'Space' || e.code === 'ArrowUp') setInput(false); };
+canvas.onmousedown = () => setInput(true);
+canvas.onmouseup = () => setInput(false);
+
+function spawn() {
+    if (state.modeLock === 'all' && state.frame % 120 === 0 && Math.random() < 0.2) {
+        const modes = ['cube', 'ship', 'wave'].filter(m => m !== state.mode);
+        state.obstacles.push({ x: 900, y: GROUND_Y - 80, w: 50, h: 120, type: 'portal', target: modes[Math.floor(Math.random()*modes.length)] });
+    } else if (state.frame % Math.max(25, 70 - state.speed*3) === 0) {
+        if (state.mode === 'cube') state.obstacles.push({ x: 900, y: GROUND_Y, w: 30, h: 30, type: 'spike' });
+        else state.obstacles.push({ x: 900, y: Math.random()*220 + 40, w: 30, h: 40, type: 'spike', move: Math.random()>0.5, mDir: 1 });
+    }
+}
+
+function die() {
+    state.running = false;
+    menu.style.display = 'block';
+}
+
+function loop() {
+    if (!state.running) return;
+    ctx.fillStyle = '#000'; ctx.fillRect(0,0,800,400);
+    state.frame++; spawn();
+
+    if(state.showCity) {
+        ctx.strokeStyle = '#151515'; ctx.lineWidth = 1;
+        state.buildings.forEach(b => {
+            b.x -= state.speed * 0.3;
+            ctx.strokeRect(b.x, 380 - b.h, b.w, b.h);
+            if(b.x + b.w < 0) b.x = 850;
+        });
+    }
+
+    let pRatio = (state.score / state.targetScore) * 100;
+    progBar.style.width = Math.min(pRatio, 100) + '%';
+    if (pRatio >= 100) { alert("COMPLETE!"); die(); return; }
+
+    if (state.mode === 'cube') {
+        player.vy += 0.8; player.y += player.vy;
+        if (player.y >= GROUND_Y) { player.y = GROUND_Y; player.vy = 0; if (state.isPressed) player.vy = -13.5; player.rot = 0; }
+        else player.rot += 0.25;
+    } else if (state.mode === 'ship') {
+        player.vy += state.isPressed ? -0.95 : 0.95; player.vy *= 0.92; player.y += player.vy; player.rot = player.vy * 0.08;
+    } else {
+        player.y += state.isPressed ? -8.5 : 8.5; player.rot = state.isPressed ? -0.75 : 0.75;
+    }
+
+    if(player.y < -15 || player.y > GROUND_Y + 25) die();
+
+    state.trail.push({x: player.x, y: player.y + 15});
+    if (state.trail.length > 25) state.trail.shift();
+    ctx.beginPath(); ctx.strokeStyle = state.color; ctx.lineWidth = 4;
+    state.trail.forEach((t, i) => { t.x -= state.speed; if(i===0) ctx.moveTo(t.x, t.y); else ctx.lineTo(t.x, t.y); });
+    ctx.stroke();
+
+    state.obstacles.forEach((o, i) => {
+        o.x -= state.speed;
+        if (o.move) { o.y += o.mDir * 2; if (o.y > 280 || o.y < 20) o.mDir *= -1; }
+        ctx.strokeStyle = o.type === 'portal' ? '#fff' : state.color; ctx.lineWidth = 3;
+        ctx.strokeRect(o.x, o.y, o.w, o.h);
+
+        if (player.x < o.x + o.w && player.x + 25 > o.x && player.y < o.y + o.h && player.y + 25 > o.y) {
+            if (o.type === 'spike') die();
+            else if (o.type === 'portal') { state.mode = o.target; modeEl.innerText = state.mode.toUpperCase(); state.obstacles.splice(i,1); }
+        }
+    });
+
+    ctx.save();
+    ctx.translate(player.x + 15, player.y + 15); ctx.rotate(player.rot);
+    ctx.strokeStyle = state.color; ctx.lineWidth = 3;
+    if(state.mode === 'cube') { ctx.strokeRect(-15,-15,30,30); ctx.strokeRect(-9,-9,18,18); }
+    else if(state.mode === 'ship') { ctx.beginPath(); ctx.moveTo(-22,12); ctx.lineTo(22,0); ctx.lineTo(-22,-12); ctx.lineTo(-12,0); ctx.closePath(); ctx.stroke(); }
+    else { ctx.beginPath(); ctx.moveTo(-18,-14); ctx.lineTo(20,0); ctx.lineTo(-18,14); ctx.lineTo(-6,0); ctx.closePath(); ctx.stroke(); ctx.fillStyle = state.color; ctx.fill(); }
+    ctx.restore();
+
+    state.score++; scoreEl.innerText = Math.floor(state.score/10);
+    requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
