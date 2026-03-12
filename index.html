@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>HTMAL-GMD est2026 - Wave Difficulty Synced</title>
+<title>HTMAL-GMD est2026 - Wave Ground Portals</title>
 <style>
 body{margin:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;color:#fff;font-family:'Segoe UI',sans-serif;overflow:hidden;}
 #menu{position:absolute;background:rgba(0,0,0,0.95);padding:25px;border:2px solid var(--accent);border-radius:15px;text-align:center;z-index:20;width:340px;box-shadow:0 0 50px rgba(0,0,0,0.8);}
@@ -187,17 +187,28 @@ state.obstacles.push({x:800+i*spacing,y:y,w:30,h:h,type:'spike',speedY:sp,dir:sR
 
 /* ---------- SPAWN ---------- */
 function spawn(){
-if(state.frame%150===0 && state.modeLock==='all'){
-let modes=['cube','ship','wave','ufo','saw'].filter(m=>m!==state.mode);
-let target=modes[Math.floor(sRandom()*modes.length)];
-state.obstacles.push({x:900,y:GROUND_Y-80,w:50,h:120,type:'portal',target});
-}
-if(state.mode==='wave') return;
-if(state.frame % Math.max(30,80-state.speed*3)!==0) return;
-if(state.mode==='cube') state.obstacles.push({x:900,y:GROUND_Y,w:30,h:30,type:'spike'});
-else if(state.mode==='ship') state.obstacles.push({x:900,y:sRandom()*200+40,w:35,h:35,type:'spike'});
-else if(state.mode==='ufo') state.obstacles.push({x:900,y:sRandom()*180+80,w:30,h:30,type:'spike'});
-else if(state.mode==='saw') state.obstacles.push({x:900,y:GROUND_Y,w:40,h:40,type:'spike'});
+  // Ground portals in ALL mode
+  if(state.frame % 150 === 0 && state.modeLock === 'all'){
+    const modes = ['cube','ship','wave','ufo','saw'].filter(m => m !== state.mode);
+    let target = modes[Math.floor(sRandom() * modes.length)];
+    let portalY = target === 'wave' ? GROUND_Y-80 : GROUND_Y;
+    state.obstacles.push({
+      x: 900,
+      y: portalY,
+      w: 50,
+      h: 120,
+      type: 'portal',
+      target: target
+    });
+  }
+
+  if(state.mode === 'wave') return; // wave obstacles handled elsewhere
+
+  if(state.frame % Math.max(30, 80 - state.speed*3) !== 0) return;
+  if(state.mode === 'cube') state.obstacles.push({x:900, y:GROUND_Y, w:30, h:30, type:'spike'});
+  else if(state.mode === 'ship') state.obstacles.push({x:900, y:sRandom()*200+40, w:35, h:35, type:'spike'});
+  else if(state.mode === 'ufo') state.obstacles.push({x:900, y:sRandom()*180+80, w:30, h:30, type:'spike'});
+  else if(state.mode === 'saw') state.obstacles.push({x:900, y:GROUND_Y, w:40, h:40, type:'spike'});
 }
 
 /* ---------- PARTICLES ---------- */
