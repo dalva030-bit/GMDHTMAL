@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>HTMAL-GMD est2026 - Wave Ground Portals</title>
+<title>HTMAL-GMD EST2026 </title>
 <style>
 body{margin:0;background:#000;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;color:#fff;font-family:'Segoe UI',sans-serif;overflow:hidden;}
 #menu{position:absolute;background:rgba(0,0,0,0.95);padding:25px;border:2px solid var(--accent);border-radius:15px;text-align:center;z-index:20;width:340px;box-shadow:0 0 50px rgba(0,0,0,0.8);}
@@ -68,12 +68,7 @@ canvas{border:3px solid var(--accent);background:#000;visibility:hidden;}
 </div>
 
 <button id="startBtn">START LEVEL</button>
-
-<div class="group" style="margin-top:20px;">
-<label>RUN THE GAUNTLET (Difficulty)</label>
-<input type="range" id="gauntletDiffSlider" min="1" max="10" value="5">
-</div>
-<button id="gauntletBtn" style="margin-top:10px; background:#ff00ff;">RUN THE GAUNTLET</button>
+<button id="gauntletBtn">GAUNTLET MODE</button>
 </div>
 
 <div class="ui" id="gameUI">
@@ -97,187 +92,474 @@ const progBar=document.getElementById('progress-bar');
 const menu=document.getElementById('menu');
 const GROUND_Y=320;
 
-let state={
-running:false, mode:'cube', modeLock:'all', color:'#0f0', speed:8, score:0, targetScore:4000,
-seed:0, isPressed:false, trail:[], obstacles:[], buildings:[], stars:[], frame:0,
-waveDifficulty:5, particles:[], gravityDir:1
-};
-
+let state={running:false,mode:'cube',modeLock:'all',color:'#0f0',speed:8,score:0,targetScore:4000,
+seed:0,isPressed:false,trail:[],obstacles:[],buildings:[],stars:[],frame:0,
+waveDifficulty:5,particles:[],gravityDir:1,gauntlet:false,spotlights:[],fires:[],gunfire:[],missiles:[],bombs:[]};
 const player={x:150,y:GROUND_Y,vy:0,rot:0};
 
-/* ---------- RANDOM ---------- */
-function sRandom(){let x=Math.sin(state.seed++)*10000;return x-Math.floor(x);}
+/* ---------- SEEDED PRNG ---------- */
+let rngState=1;
+function seedPRNG(seedStr){rngState=0; for(let i=0;i<seedStr.length;i++) rngState = (rngState*31 + seedStr.charCodeAt(i)) & 0x7fffffff;}
+function sRandom(){rngState=(rngState*9301+49297)%233280; return rngState/233280;}
+
+/* ---------- STARS / CITY ---------- */
 function genStars(){state.stars=[];for(let i=0;i<80;i++)state.stars.push({x:sRandom()*800,y:sRandom()*300,s:sRandom()*2});}
-function genCity(){state.buildings=[];for(let i=0;i<12;i++)state.buildings.push({x:i*80,w:50+sRandom()*50,h:80+sRandom()*180});}
 
-/* ---------- START ---------- */
-document.getElementById('startBtn').onclick=startLevel;
-document.getElementById('gauntletBtn').onclick=startGauntlet;
+function genCity(){
+    state.buildings=[]; state.fires=[]; state.gunfire=[]; state.missiles=[]; state.bombs=[];
 
-function startLevel(){
-let rawSeed=document.getElementById('seedInput').value||Math.random().toString();
-state.seed=rawSeed.split('').reduce((a,b)=>((a<<5)-a)+b.charCodeAt(0)&a,0);
-state.speed=parseInt(document.getElementById('diffSlider').value);
-state.targetScore=parseInt(document.getElementById('lenSlider').value);
-state.modeLock=document.getElementById('modeSelect').value;
-state.color=document.getElementById('colorPick').value;
-state.waveDifficulty=parseInt(document.getElementById('waveDiffSlider').value);
-state.mode=state.modeLock==='all'?'cube':state.modeLock;
-document.documentElement.style.setProperty('--accent',state.color);
-prepareRun();
+    for(let i=0;i<12;i++){
+        let w=50+sRandom()*50;
+        let h=80+sRandom()*180;
+        let x=i*80;
+
+        if(state.gauntlet){
+            // GAUNTLET ADD — ruined buildings
+            h*=(0.4+sRandom()*0.4);
+            let tilt=(sRandom()-0.5)*1.2;
+            state.buildings.push({x,w,h,tilt,broken:true});
+
+            // shattered windows (stored as boolean)
+        } else {
+            state.buildings.push({x,w,h,tilt:0,broken:false});
+        }
+    }
+
+    // GAUNTLET ADD — spotlights (5 strong beams)
+    if(state.gauntlet){
+        state.spotlights=[];
+        for(let i=0;i<5;i++){
+            state.spotlights.push({
+                x:-300 - i*200,
+                angle:(Math.PI/6)+(sRandom()-0.5)*0.4,
+                speed:1.5 + sRandom()*1.5
+            });
+        }
+    }
 }
 
-function startGauntlet(){
-state.seed=Math.floor(Math.random()*999999);
-state.speed=9;
-state.targetScore=20000;
-state.modeLock='all';
-state.color='#ff00ff';
-state.waveDifficulty=parseInt(document.getElementById('gauntletDiffSlider').value);
-state.mode='cube';
-document.documentElement.style.setProperty('--accent',state.color);
-prepareRun();
+document.getElementById('startBtn').onclick = () => { state.gauntlet = false; startLevel(); }
+document.getElementById('gauntletBtn').onclick = () => { state.gauntlet = true; startLevel(); }
+
+function startLevel(){
+    let rawSeed=document.getElementById('seedInput').value||Math.random().toString();
+    seedPRNG(rawSeed);
+    state.speed=parseInt(document.getElementById('diffSlider').value);
+    state.targetScore=parseInt(document.getElementById('lenSlider').value);
+    state.modeLock=document.getElementById('modeSelect').value;
+    state.color=document.getElementById('colorPick').value;
+    state.waveDifficulty=parseInt(document.getElementById('waveDiffSlider').value);
+    state.mode=state.modeLock==='all'?'cube':state.modeLock;
+    document.documentElement.style.setProperty('--accent',state.color);
+    prepareRun();
 }
 
 function prepareRun(){
-state.running=true; state.score=0; state.obstacles=[]; state.trail=[]; state.frame=0; state.particles=[];
-player.y=GROUND_Y; player.vy=0; player.rot=0;
-genCity(); genStars();
-menu.style.display='none'; canvas.style.visibility='visible';
-document.getElementById('gameUI').style.visibility='visible';
-document.getElementById('progress-container').style.visibility='visible';
-if(state.mode==='wave') generateWaveObstacles();
-loop();
+    state.running=true; state.score=0; state.obstacles=[]; state.trail=[]; state.frame=0; state.particles=[];
+    player.y=GROUND_Y; player.vy=0; player.rot=0;
+    genCity(); genStars();
+    menu.style.display='none'; canvas.style.visibility='visible';
+    document.getElementById('gameUI').style.visibility='visible';
+    document.getElementById('progress-container').style.visibility='visible';
+
+    if(state.mode==='wave' || state.modeLock==='all') generateWaveObstacles();
+
+    loop();
 }
 
-/* ---------- INPUT ---------- */
-function setInput(v){ 
-if(v && state.mode==='ufo') player.vy=-11;
-if(v && state.mode==='saw'){state.gravityDir*=-1;} 
-state.isPressed=v;
-}
+/* INPUT */
+function setInput(v){ if(v && state.mode==='saw'){state.gravityDir*=-1;} state.isPressed=v;}
 window.onkeydown=e=>{if(['Space','ArrowUp','ArrowLeft','ArrowRight','KeyW'].includes(e.code)) setInput(true);}
 window.onkeyup=e=>{if(['Space','ArrowUp','ArrowLeft','ArrowRight','KeyW'].includes(e.code)) setInput(false);}
 canvas.onmousedown=()=>setInput(true);
 canvas.onmouseup=()=>setInput(false);
 
-/* ---------- PORTAL COLORS ---------- */
+/* ---------- PORTAL COLOR ---------- */
 function portalColor(m){
-if(m==='cube')return'#00ff00';
-if(m==='ship')return'#00aaff';
-if(m==='wave')return'#aa00ff';
-if(m==='ufo')return'#ffee00';
-if(m==='saw')return'#00ffff';
-return'#fff';
+    if(m==='cube')return'#00ff00';
+    if(m==='ship')return'#00aaff';
+    if(m==='wave')return'#aa00ff';
+    if(m==='ufo')return'#ffee00';
+    if(m==='saw')return'#00ffff';
+    return'#fff';
 }
 
-/* ---------- WAVE OBSTACLE GENERATION SYNCED ---------- */
+/* ---------- WAVE OBSTACLES ---------- */
 function generateWaveObstacles(){
-state.obstacles=state.obstacles.filter(o=>o.type!=='spike'); // remove old wave spikes
-let count = state.waveDifficulty*3;
-let spacing = Math.max(120, 250 - state.waveDifficulty*15); // closer together at higher difficulty
-for(let i=0;i<count;i++){
-let h=20+10*sRandom();
-let minY=50,maxY=canvas.height-50-h;
-let y=minY+sRandom()*(maxY-minY);
-let sp=1.5 + state.waveDifficulty*0.25 + sRandom()*1.5; // speed scales with difficulty
-state.obstacles.push({x:800+i*spacing,y:y,w:30,h:h,type:'spike',speedY:sp,dir:sRandom()>0.5?1:-1,minY:minY,maxY:maxY});
-}
-}
-
-/* ---------- SPAWN ---------- */
-function spawn(){
-  // Ground portals in ALL mode
-  if(state.frame % 150 === 0 && state.modeLock === 'all'){
-    const modes = ['cube','ship','wave','ufo','saw'].filter(m => m !== state.mode);
-    let target = modes[Math.floor(sRandom() * modes.length)];
-    let portalY = target === 'wave' ? GROUND_Y-80 : GROUND_Y;
-    state.obstacles.push({
-      x: 900,
-      y: portalY,
-      w: 50,
-      h: 120,
-      type: 'portal',
-      target: target
-    });
-  }
-
-  if(state.mode === 'wave') return; // wave obstacles handled elsewhere
-
-  if(state.frame % Math.max(30, 80 - state.speed*3) !== 0) return;
-  if(state.mode === 'cube') state.obstacles.push({x:900, y:GROUND_Y, w:30, h:30, type:'spike'});
-  else if(state.mode === 'ship') state.obstacles.push({x:900, y:sRandom()*200+40, w:35, h:35, type:'spike'});
-  else if(state.mode === 'ufo') state.obstacles.push({x:900, y:sRandom()*180+80, w:30, h:30, type:'spike'});
-  else if(state.mode === 'saw') state.obstacles.push({x:900, y:GROUND_Y, w:40, h:40, type:'spike'});
+    state.obstacles=state.obstacles.filter(o=>o.type!=='spike'&&o.type!=='wavePortal');
+    if(state.mode==='wave' || state.modeLock==='all'){
+        let count=state.waveDifficulty*4;
+        let spacing=Math.max(100,250-state.waveDifficulty*20);
+        for(let i=0;i<count;i++){
+            let h=20+15*sRandom(),minY=50,maxY=canvas.height-50-h;
+            let y=minY+sRandom()*(maxY-minY);
+            let sp=2 + state.waveDifficulty*0.5 + sRandom()*2;
+            state.obstacles.push({x:800+i*spacing,y:y,w:30,h:h,type:'spike',speedY:sp,dir:sRandom()>0.5?1:-1,minY:minY,maxY:maxY});
+        }
+    }
+    if(state.modeLock==='all'){
+        ['cube','ship','ufo','saw'].forEach((m,i)=>
+            state.obstacles.push({x:900+i*250,y:50+sRandom()*300,w:50,h:50,type:'wavePortal',target:m})
+        );
+    }
 }
 
-/* ---------- PARTICLES ---------- */
-function spawnDeathParticles(x,y){for(let i=0;i<20;i++)state.particles.push({x,y,vx:(Math.random()-0.5)*6,vy:(Math.random()-0.5)*6,life:20+Math.random()*10});}
+/* ---------- SPAWN (GAUNTLET BUFF INCLUDED) ---------- */
+function spawn() {
+
+    // E: obstacles start sooner (no early delay)
+    if (!state.gauntlet) {
+        if (state.frame < 30) return;
+    } else {
+        if (state.frame < 5) return;
+    }
+
+    // F: more portals (gauntlet buff)
+    if(state.frame % (state.gauntlet ? 60 : 100) === 0 && state.modeLock === 'all'){
+        let modes = ['cube','ship','wave','ufo','saw'].filter(m => m !== state.mode);
+        state.obstacles.push({
+            x: 900,
+            y: GROUND_Y - 80,
+            w: 50,
+            h: 120,
+            type: 'portal',
+            target: modes[Math.floor(sRandom() * modes.length)]
+        });
+    }
+
+    // wave mode obstacles
+    if (state.mode === 'wave') {
+        if (state.frame % 30 === 0) { // B: faster spawn
+            let h = 20 + (sRandom() * 40);
+            let y = sRandom() * (canvas.height - 200);
+            state.obstacles.push({ x: 900, y, w: 40, h, type: 'block' });
+        }
+        return;
+    }
+
+    // C: harder spike patterns (gauntlet)
+    let spikeInterval = state.gauntlet ? 50 : 80;
+
+    if (state.frame % spikeInterval === 0) {
+        let tall = state.gauntlet ? (40 + sRandom()*80) : 40;
+
+        state.obstacles.push({
+            x: 900,
+            y: GROUND_Y - tall,
+            w: 40,
+            h: tall,
+            type: 'spike'
+        });
+    }
+
+    // GAUNTLET ADD — gunfire bursts
+    if(state.gauntlet && state.frame % 25 === 0){
+        state.gunfire.push({
+            x: sRandom()*800,
+            y: GROUND_Y - (40 + sRandom()*120),
+            vy: -8 - sRandom()*4,
+            life: 25
+        });
+    }
+
+    // GAUNTLET ADD — falling missiles
+    if(state.gauntlet && state.frame % 40 === 0){
+        state.missiles.push({
+            x: 200 + sRandom()*600,
+            y: -50,
+            vy: 4 + sRandom()*4,
+            life: 200
+        });
+    }
+
+    // GAUNTLET ADD — bombs
+    if(state.gauntlet && state.frame % 90 === 0){
+        state.bombs.push({
+            x: sRandom()*800,
+            y: -30,
+            vy: 2 + sRandom()*3,
+            life: 200,
+            exploded:false
+        });
+    }
+}
 
 /* ---------- MENU ---------- */
-function showMenu(){state.running=false;canvas.style.visibility='hidden';document.getElementById('gameUI').style.visibility='hidden';document.getElementById('progress-container').style.visibility='hidden';menu.style.display='block';}
+function showMenu(){state.running=false; canvas.style.visibility='hidden'; document.getElementById('gameUI').style.visibility='hidden'; document.getElementById('progress-container').style.visibility='hidden'; menu.style.display='block';}
 
-/* ---------- LOOP ---------- */
+/* ---------- DEATH FX ---------- */
+function spawnDeathParticles(x,y){for(let i=0;i<20;i++)state.particles.push({x,y,vx:(Math.random()-0.5)*6,vy:(Math.random()-0.5)*6,life:20+Math.random()*10});}
+
+/* ---------- MAIN LOOP ---------- */
 function loop(){
 if(!state.running) return;
-ctx.fillStyle='#000'; ctx.fillRect(0,0,800,400);
+
+ctx.fillStyle='#000';
+ctx.fillRect(0,0,800,400);
+
 state.frame++;
 spawn();
 
 /* stars */
-ctx.fillStyle=state.color; state.stars.forEach(s=>{s.x-=state.speed*0.2;ctx.fillRect(s.x,s.y,s.s,s.s);if(s.x<0)s.x=800;});
+ctx.fillStyle=state.color;
+state.stars.forEach(s=>{
+    s.x-=state.speed*0.2;
+    ctx.fillRect(s.x,s.y,s.s,s.s);
+    if(s.x<0) s.x=800;
+});
 
 /* buildings */
-state.buildings.forEach(b=>{b.x-=state.speed*0.4;ctx.strokeStyle='#222';ctx.strokeRect(b.x,380-b.h,b.w,b.h);ctx.fillStyle=state.color;for(let wy=0;wy<b.h;wy+=30)for(let wx=0;wx<b.w;wx+=20)if(sRandom()>0.6)ctx.fillRect(b.x+wx+5,380-b.h+wy+5,6,6);if(b.x+b.w<0)b.x=900;});
+state.buildings.forEach(b=>{
+    b.x-=state.speed*0.4;
+    ctx.save();
+    ctx.translate(b.x+b.w/2,380-b.h/2);
+    ctx.rotate(b.tilt);
 
-/* progress */
-let pr=state.score/state.targetScore*100; progBar.style.width=Math.min(pr,100)+'%'; if(pr>=100){alert("HTMAL-GMD: COMPLETE!"); showMenu(); return;}
+    ctx.strokeStyle='#222';
+    ctx.strokeRect(-b.w/2,-b.h/2,b.w,b.h);
 
-/* physics */
-if(state.mode==='cube'){player.vy+=0.85;player.y+=player.vy;if(player.y>=GROUND_Y){player.y=GROUND_Y;player.vy=0;if(state.isPressed)player.vy=-14;player.rot=0;}else player.rot+=0.25;}
-else if(state.mode==='ship'){player.vy+=state.isPressed?-1:1;player.vy*=0.92;player.y+=player.vy;player.rot=player.vy*0.08;}
-else if(state.mode==='wave'){player.y+=state.isPressed?-6:6;player.rot=state.isPressed?-0.7:0.7;}
-else if(state.mode==='ufo'){player.vy+=0.75;player.y+=player.vy;player.rot+=0.1;if(player.y>=GROUND_Y){player.y=GROUND_Y;player.vy=0;}}
-else if(state.mode==='saw'){player.vy+=0.7*state.gravityDir;player.y+=player.vy;if(state.gravityDir===1&&player.y>=GROUND_Y){player.y=GROUND_Y;player.vy=0;}if(state.gravityDir===-1&&player.y<=30){player.y=30;player.vy=0;}player.rot+=0.35*state.gravityDir;}
+    // shattered windows
+    for(let wy=0;wy<b.h;wy+=25){
+        for(let wx=0;wx<b.w;wx+=20){
+            if(sRandom()>0.7){
+                ctx.fillStyle = b.broken ? '#333' : 'yellow';
+                ctx.fillRect(-b.w/2+wx,-b.h/2+wy,6,6);
+                if(b.broken && sRandom()>0.8){
+                    ctx.fillStyle='#000';
+                    ctx.fillRect(-b.w/2+wx,-b.h/2+wy,6,6); // broken hole
+                }
+            }
+        }
+    }
 
-/* death offscreen */
-if(player.y<0||player.y>canvas.height-30){spawnDeathParticles(player.x+15,player.y+15);showMenu();}
+    ctx.restore();
 
-/* trail */
-state.trail.push({x:player.x,y:player.y+15});if(state.trail.length>20)state.trail.shift();
-ctx.beginPath();ctx.strokeStyle=state.color;ctx.lineWidth=3;state.trail.forEach((t,i)=>{t.x-=state.speed;if(i===0)ctx.moveTo(t.x,t.y);else ctx.lineTo(t.x,t.y);});ctx.stroke();
+    if(b.x+b.w<0) b.x=900;
+});
 
-/* obstacles */
+/* ---------- GAUNTLET EXTRA BACKGROUND FX ---------- */
+
+if(state.gauntlet){
+
+    /* spotlights */
+    state.spotlights.forEach(s=>{
+        s.x+=s.speed;
+        if(s.x>canvas.width) s.x=-300;
+
+        ctx.save();
+        ctx.translate(s.x,0);
+        ctx.rotate(s.angle);
+        ctx.fillStyle='rgba(255,255,255,0.07)';
+        ctx.fillRect(0,0,800,400);
+        ctx.restore();
+    });
+
+    /* gunfire tracers */
+    for(let i=state.gunfire.length-1;i>=0;i--){
+        let g=state.gunfire[i];
+        g.y+=g.vy;
+        g.life--;
+
+        ctx.fillStyle='orange';
+        ctx.fillRect(g.x,g.y,2,6);
+
+        if(g.life<=0) state.gunfire.splice(i,1);
+    }
+
+    /* missiles */
+    for(let i=state.missiles.length-1;i>=0;i--){
+        let m=state.missiles[i];
+        m.y+=m.vy;
+        m.life--;
+
+        ctx.strokeStyle='red';
+        ctx.beginPath();
+        ctx.moveTo(m.x,m.y);
+        ctx.lineTo(m.x,m.y+15);
+        ctx.stroke();
+
+        if(m.life<=0 || m.y>360){
+            state.missiles.splice(i,1);
+        }
+    }
+
+    /* bombs */
+    for(let i=state.bombs.length-1;i>=0;i--){
+        let bmb=state.bombs[i];
+        bmb.y+=bmb.vy;
+        bmb.life--;
+
+        if(!bmb.exploded){
+            ctx.fillStyle='gray';
+            ctx.fillRect(bmb.x,bmb.y,6,10);
+        }
+
+        if(!bmb.exploded && bmb.y>GROUND_Y-10){
+            bmb.exploded=true;
+            bmb.life=20;
+        }
+
+        if(bmb.exploded){
+            ctx.fillStyle='orange';
+            ctx.beginPath();
+            ctx.arc(bmb.x,bmb.y,20,0,Math.PI*2);
+            ctx.fill();
+        }
+
+        if(bmb.life<=0) state.bombs.splice(i,1);
+    }
+}
+
+/* -------- progress bar ------- */
+let pr=state.score/state.targetScore*100;
+progBar.style.width=Math.min(pr,100)+'%';
+if(pr>=100){alert("HTMAL-GMD: COMPLETE!"); showMenu(); return;}
+
+/* -------- physics -------- */
+switch(state.mode){
+case 'cube':
+    player.vy+=0.85;
+    player.y+=player.vy;
+    if(player.y>=GROUND_Y){
+        player.y=GROUND_Y; player.vy=0;
+        if(state.isPressed) player.vy=-14;
+        player.rot=0;
+    } else player.rot+=0.25;
+break;
+
+case 'ship':
+    player.vy+=(state.isPressed?-1:1);
+    player.vy*=0.92;
+    player.y+=player.vy;
+    player.rot=player.vy*0.08;
+break;
+
+case 'wave':
+    player.y+=state.isPressed?-6:6;
+    player.rot=state.isPressed?-0.7:0.7;
+break;
+
+case 'ufo':
+    player.vy+=state.isPressed?-6:0.5;
+    player.y+=player.vy;
+    if(player.y>GROUND_Y) player.y=GROUND_Y,player.vy=0;
+    if(player.y<30) player.y=30,player.vy=0;
+    player.rot=player.vy*0.05;
+break;
+
+case 'saw':
+    player.vy+=0.7*state.gravityDir;
+    player.y+=player.vy;
+    if(player.y>=GROUND_Y && state.gravityDir===1){player.y=GROUND_Y; player.vy=0;}
+    if(player.y<=30 && state.gravityDir===-1){player.y=30; player.vy=0;}
+    player.rot+=0.35*state.gravityDir;
+break;
+}
+
+/* offscreen death */
+if(player.y<0||player.y>canvas.height-30){
+    spawnDeathParticles(player.x+15,player.y+15);
+    showMenu(); return;
+}
+
+/* -------- trail -------- */
+state.trail.push({x:player.x,y:player.y+15});
+if(state.trail.length>20) state.trail.shift();
+
+ctx.beginPath();
+ctx.strokeStyle=state.color;
+ctx.lineWidth=3;
+state.trail.forEach((t,i)=>{
+    t.x-=state.speed;
+    if(i===0) ctx.moveTo(t.x,t.y);
+    else ctx.lineTo(t.x,t.y);
+});
+ctx.stroke();
+
+/* -------- obstacles -------- */
 state.obstacles.forEach((o,i)=>{
-if(state.mode==='wave'&&o.type==='spike'){o.y+=o.speedY*o.dir;if(o.y<o.minY||o.y+o.h>o.maxY)o.dir*=-1;o.x-=state.speed;if(o.x+o.w<0)o.x=canvas.width+Math.random()*200;} 
-else o.x-=(state.mode==='wave'?0:state.speed);
 
-ctx.strokeStyle=o.type==='portal'?portalColor(o.target):state.color;ctx.strokeRect(o.x,o.y,o.w||o.h,o.h);
-if(player.x<o.x+o.w&&player.x+25>o.x&&player.y<o.y+o.h&&player.y+25>o.y){
-if(o.type==='spike'){spawnDeathParticles(player.x+15,player.y+15);showMenu();}
-else if(o.type==='portal'){
-if(state.mode==='wave'&&o.target!=='wave')state.obstacles=state.obstacles.filter(ob=>ob.type==='portal');
-if(o.target==='wave') generateWaveObstacles();
-if(o.target==='saw')state.gravityDir=1;
-state.mode=o.target;modeEl.innerText=state.mode.toUpperCase();
-state.obstacles.splice(i,1);
-}}
+    if(o.type==='spike'){
+        if(state.mode==='wave'){
+            o.y+=o.speedY*o.dir;
+            if(o.y<o.minY||o.y+o.h>o.maxY) o.dir*=-1;
+        }
+        o.x-=state.speed;
+    } else {
+        o.x-=state.speed;
+    }
+
+    ctx.strokeStyle=(o.type==='portal'||o.type==='wavePortal')?portalColor(o.target):state.color;
+    ctx.strokeRect(o.x,o.y,o.w,o.h);
+
+    if(player.x<o.x+o.w&&player.x+25>o.x&&player.y<o.y+o.h&&player.y+25>o.y){
+
+        if(o.type==='spike'){
+            spawnDeathParticles(player.x+15,player.y+15);
+            showMenu(); return;
+        }
+
+        if(o.type==='portal'||o.type==='wavePortal'){
+            state.mode=o.target;
+            modeEl.innerText=state.mode.toUpperCase();
+
+            if(state.mode==='wave') generateWaveObstacles();
+            if(state.mode==='saw') state.gravityDir=1;
+
+            state.obstacles.splice(i,1);
+        }
+    }
 });
 
 /* particles */
-for(let i=state.particles.length-1;i>=0;i--){let p=state.particles[i];p.x+=p.vx;p.y+=p.vy;p.life--;ctx.fillStyle=state.color;ctx.fillRect(p.x,p.y,3,3);if(p.life<=0)state.particles.splice(i,1);}
+for(let i=state.particles.length-1;i>=0;i--){
+    let p=state.particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.life--;
+    ctx.fillStyle=state.color;
+    ctx.fillRect(p.x,p.y,3,3);
+    if(p.life<=0) state.particles.splice(i,1);
+}
 
 /* draw player */
-ctx.save();ctx.translate(player.x+15,player.y+15);ctx.rotate(player.rot);ctx.strokeStyle=state.color;ctx.lineWidth=3;
-if(state.mode==='cube'){ctx.strokeRect(-15,-15,30,30);ctx.strokeRect(-8,-8,16,16);}
-else if(state.mode==='ship'){ctx.beginPath();ctx.moveTo(-22,12);ctx.lineTo(22,0);ctx.lineTo(-22,-12);ctx.lineTo(-12,0);ctx.closePath();ctx.stroke();}
-else if(state.mode==='wave'){ctx.beginPath();ctx.moveTo(-18,-14);ctx.lineTo(20,0);ctx.lineTo(-18,14);ctx.lineTo(-6,0);ctx.closePath();ctx.stroke();ctx.fill();}
-else if(state.mode==='ufo'){ctx.beginPath();ctx.arc(0,0,15,0,Math.PI,true);ctx.lineTo(-15,0);ctx.stroke();ctx.strokeRect(-18,0,36,8);}
-else if(state.mode==='saw'){ctx.beginPath();ctx.arc(0,0,18,0,Math.PI*2);ctx.stroke();for(let i=0;i<12;i++){let ang=i*(Math.PI/6);ctx.beginPath();ctx.moveTo(Math.cos(ang)*18,Math.sin(ang)*18);ctx.lineTo(Math.cos(ang)*25,Math.sin(ang)*25);ctx.stroke();}}
+ctx.save();
+ctx.translate(player.x+15,player.y+15);
+ctx.rotate(player.rot);
+ctx.strokeStyle=state.color;
+ctx.lineWidth=3;
+
+if(state.mode==='cube'){
+    ctx.strokeRect(-15,-15,30,30);
+    ctx.strokeRect(-8,-8,16,16);
+}
+else if(state.mode==='ship'){
+    ctx.beginPath();
+    ctx.moveTo(-22,12); ctx.lineTo(22,0); ctx.lineTo(-22,-12); ctx.lineTo(-12,0);
+    ctx.closePath(); ctx.stroke();
+}
+else if(state.mode==='wave'){
+    ctx.beginPath();
+    ctx.moveTo(-18,-14); ctx.lineTo(20,0); ctx.lineTo(-18,14); ctx.lineTo(-6,0);
+    ctx.closePath(); ctx.stroke(); ctx.fill();
+}
+else if(state.mode==='ufo'){
+    ctx.beginPath(); ctx.arc(0,0,15,0,Math.PI,true); ctx.lineTo(-15,0); ctx.stroke();
+    ctx.strokeRect(-18,0,36,8);
+}
+else if(state.mode==='saw'){
+    ctx.beginPath(); ctx.arc(0,0,18,0,Math.PI*2); ctx.stroke();
+    for(let i=0;i<12;i++){
+        let ang=i*(Math.PI/6);
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(ang)*18,Math.sin(ang)*18);
+        ctx.lineTo(Math.cos(ang)*25,Math.sin(ang)*25);
+        ctx.stroke();
+    }
+}
 ctx.restore();
 
-state.score++;scoreEl.innerText=Math.floor(state.score/10);
 requestAnimationFrame(loop);
+scoreEl.innerText=Math.floor(state.score/10);
+state.score++;
 }
 </script>
 </body>
